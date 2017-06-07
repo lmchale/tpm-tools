@@ -34,18 +34,43 @@ static void help(const char *aCmd)
 		     _
 		     ("Filename to write sealed key to.  Default is STDOUT."));
 	logCmdOption("-p, --pcr NUMBER",
+			 _
+			 ("PCR to seal data to.  Default is none.  This option can be specified multiple times to choose more than one PCR."));
+	logCmdOption("-r, --future SHA1_HEX (char[40])",
 		     _
-		     ("PCR to seal data to.  Default is none.  This option can be specified multiple times to choose more than one PCR."));
+			 ("SHA1 of future PCR value.  Applies to last -p option.  Default is none.  This option can be specified multiple times to choose more than one PCR."));
 	logCmdOption("-z, --well-known", _("Use TSS_WELL_KNOWN_SECRET as the SRK secret."));
 	logCmdOption("-u, --unicode", _("Use TSS UNICODE encoding for the SRK password to comply with applications using TSS popup boxes"));
 
 }
+
+static int hex_to_array(const char *const str, const int strlen,
+						BYTE *const arr, const int arrlen) {
+	if (arrlen < strlen/2 || strlen %2 != 0)
+		return -1; // ERROR in array sizes
+
+	int status = 1;
+	int i = 0;
+	for (i = 0; i < strlen / 2 && status == 1; i++) {
+		status = sscanf(str + 2*i, "%02x", &arr[i]);
+	}
+	if (status == 1)
+		return 0; // SUCCESS
+	else
+		return -2; // ERROR during convert
+}
+
+typedef struct tdFUTURE_PCR {
+	int pcr;	// pcr value + magic (0x800)
+	TCPA_PCRVALUE value;
+} FUTURE_PCR;
 
 static char in_filename[PATH_MAX] = "", out_filename[PATH_MAX] = "";
 static TSS_HPCRS hPcrs = NULL_HPCRS;
 static TSS_HTPM hTpm;
 static UINT32 selectedPcrs[24];
 static UINT32 selectedPcrsLen = 0;
+static FUTURE_PCR futurePcrs[24];
 static BOOL passUnicode = FALSE;
 static BOOL isWellKnown = FALSE;
 TSS_HCONTEXT hContext = 0;
@@ -71,6 +96,22 @@ static int parse(const int aOpt, const char *aArg)
 		if (aArg) {
 			selectedPcrs[selectedPcrsLen++] = atoi(aArg);
 			rc = 0;
+		}
+		break;
+	case 'r':
+		if (aArg) {
+			UINT32 len = strlen(aArg);
+			if (selectedPcrsLen == 0 || len != 2 * TPM_SHA1_160_HASH_LEN) {
+				break;
+			}
+
+			UINT32 idx = selectedPcrsLen - 1;
+			futurePcrs[idx].pcr = selectedPcrs[idx] + 0x800;
+			int status = hex_to_array(aArg, len,
+									  futurePcrs[idx].value.digest, TPM_SHA1_160_HASH_LEN);
+			if (status == 0) {
+				rc = 0;
+			}
 		}
 		break;
 	case 'u':
@@ -99,6 +140,7 @@ int main(int argc, char **argv)
 	    { {"infile", required_argument, NULL, 'i'},
 	{"outfile", required_argument, NULL, 'o'},
 	{"pcr", required_argument, NULL, 'p'},
+	{"future", required_argument, NULL, 'r'},
 	{"unicode", no_argument, NULL, 'u'},
 	{"well-known", no_argument, NULL, 'z'}
 	};
@@ -123,7 +165,7 @@ int main(int argc, char **argv)
 
 	initIntlSys();
 
-	if (genericOptHandler(argc, argv, "i:o:p:uz", opts,
+	if (genericOptHandler(argc, argv, "i:o:p:r:uz", opts,
 			      sizeof(opts) / sizeof(struct option), parse,
 			      help) != 0)
 		goto out;
@@ -179,6 +221,30 @@ int main(int argc, char **argv)
 		for (i = 0; i < selectedPcrsLen; i++) {
 			if (tpmPcrRead(hTpm, selectedPcrs[i], &pcrSize, &pcrValue) != TSS_SUCCESS)
 				goto out_close;
+
+			// BEGIN pcr override code
+			if (pcrSize == TPM_SHA1_160_HASH_LEN) {
+				const int pcr = futurePcrs[i].pcr - 0x800;
+				// override pcr value if pcr in expected range:
+				if (futurePcrs[i].pcr == 0) {
+					// no override present
+				}
+				else if (pcr >= 0 && pcr < 32) {
+					// override present
+					memcpy(pcrValue, futurePcrs[i].value.digest, pcrSize);
+				}
+				else {
+					// unexpected value!
+					logError(_("Unable to override future value of PCR %i!\n"
+							   "pcr out of expected range (0-31)\n"), pcr);
+				}
+			}
+			else {
+				logError(_("Unable to override future value of PCR %u!\n"
+						   "pcrSize %u expected to be %u.\n"),
+						   selectedPcrs[i], pcrSize, TPM_SHA1_160_HASH_LEN);
+			}
+			// END pcr override code
 
 			if (pcrcompositeSetPcrValue(hPcrs, selectedPcrs[i], pcrSize, pcrValue)
 					!= TSS_SUCCESS)
