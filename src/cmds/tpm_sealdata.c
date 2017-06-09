@@ -36,7 +36,7 @@ static void help(const char *aCmd)
 	logCmdOption("-p, --pcr NUMBER",
 			 _
 			 ("PCR to seal data to.  Default is none.  This option can be specified multiple times to choose more than one PCR."));
-	logCmdOption("-r, --future SHA1_HEX (char[40])",
+	logCmdOption("-f, --future SHA1_HEX (char[40])",
 		     _
 			 ("SHA1 of future PCR value.  Applies to last -p option.  Default is none.  This option can be specified multiple times to choose more than one PCR."));
 	logCmdOption("-z, --well-known", _("Use TSS_WELL_KNOWN_SECRET as the SRK secret."));
@@ -61,7 +61,7 @@ static int hex_to_array(const char *const str, const int strlen,
 }
 
 typedef struct tdFUTURE_PCR {
-	int pcr;	// pcr value + magic (0x800)
+	int pcr;	// pcr register + magic (0x800)
 	TCPA_PCRVALUE value;
 } FUTURE_PCR;
 
@@ -98,7 +98,7 @@ static int parse(const int aOpt, const char *aArg)
 			rc = 0;
 		}
 		break;
-	case 'r':
+	case 'f':
 		if (aArg) {
 			UINT32 len = strlen(aArg);
 			if (selectedPcrsLen == 0 || len != 2 * TPM_SHA1_160_HASH_LEN) {
@@ -140,7 +140,7 @@ int main(int argc, char **argv)
 	    { {"infile", required_argument, NULL, 'i'},
 	{"outfile", required_argument, NULL, 'o'},
 	{"pcr", required_argument, NULL, 'p'},
-	{"future", required_argument, NULL, 'r'},
+	{"future", required_argument, NULL, 'f'},
 	{"unicode", no_argument, NULL, 'u'},
 	{"well-known", no_argument, NULL, 'z'}
 	};
@@ -165,7 +165,7 @@ int main(int argc, char **argv)
 
 	initIntlSys();
 
-	if (genericOptHandler(argc, argv, "i:o:p:r:uz", opts,
+	if (genericOptHandler(argc, argv, "i:o:p:f:uz", opts,
 			      sizeof(opts) / sizeof(struct option), parse,
 			      help) != 0)
 		goto out;
