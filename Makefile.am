@@ -24,10 +24,9 @@
 SUBDIRS		= 	m4  	\
 			include \
 			lib	\
-			src	\
-			po	\
-			man
+			src
 
 ACLOCAL_AMFLAGS = -I m4
 
 EXTRA_DIST = LICENSE test/tpm_changeownerauth01.sh
+
